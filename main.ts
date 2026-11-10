@@ -1,80 +1,100 @@
 /**
- * TURRET – micro:bit, ktery sedi na turretu
+ * TURRET – micro:bit na turretu
  * 
- * Kitronik Simple Servo: servo 1 = P8, servo 2 = P15, servo 3 = P16
+ * Kitronik Simple Servo: servo 1 = P8 otaceni, servo 2 = P15 mireni, servo 3 = P16 odpal
  * 
- * Servo 1 (P8)  = otaceni (spojite servo 360°)
- * 
- * Servo 2 (P15) = mireni nahoru/dolu (servo 180°)
+ * Radio jen uklada prikazy, serva ridi samostatne smycky -> nic se nezasekava
  */
-// Kalibrace STOP: tlacitka primo na turretu, cislo se ukaze na displeji
+/**
+ * ---- promenne ----
+ */
+// ---- Ladeni na turretu (ovladac vypnout!) ----
+// A = hlaven niz o 5, B = hlaven vys o 5, na displeji je uhel
 input.onButtonPressed(Button.A, function () {
-    STOP += -1
-    pins.servoWritePin(AnalogPin.P8, STOP)
-    basic.showNumber(STOP)
+    cil_uhel += -5
+    basic.showNumber(cil_uhel)
+})
+// A+B = zkusebni vystrel
+input.onButtonPressed(Button.AB, function () {
+    vystrel = true
 })
 input.onButtonPressed(Button.B, function () {
-    STOP += 1
-    pins.servoWritePin(AnalogPin.P8, STOP)
-    basic.showNumber(STOP)
+    cil_uhel += 5
+    basic.showNumber(cil_uhel)
 })
+// Radio: jen si zapamatuje, co ovladac chce
 radio.onReceivedValue(function (name, value) {
     posledni_signal = input.runningTime()
     if (name == "otoc") {
-        if (Math.abs(value) < MRTVA_ZONA) {
-            rychlost = STOP
-        } else {
-            rychlost = STOP + Math.constrain(value, -60, 60) / 2
-        }
-        pins.servoWritePin(AnalogPin.P8, rychlost)
+        cil_otoc = value
     } else if (name == "mir") {
-        // rozsah 90-150 jako originalni turret (hlaven nenarazi do drzaku)
-        uhel = pins.map(
+        cil_uhel = pins.map(
         Math.constrain(value, -45, 45),
         -45,
         45,
-        90,
-        150
+        MIR_MIN,
+        MIR_MAX
         )
-        pins.servoWritePin(AnalogPin.P15, uhel)
-    } else if (name == "pal" && !(strileni)) {
-        strileni = true
-        basic.showIcon(IconNames.Target)
-        music.playTone(988, music.beat(BeatFraction.Eighth))
-        pins.servoWritePin(AnalogPin.P16, ODPAL_RYCHLOST)
-        basic.pause(ODPAL_MS)
-        pins.servoWritePin(AnalogPin.P16, STOP)
-        strileni = false
-        basic.showIcon(IconNames.Happy)
+    } else if (name == "pal") {
+        vystrel = true
     }
 })
-let strileni = false
+let zapsany_uhel = 0
+let cil_otoc = 0
 let posledni_signal = 0
-let uhel = 0
-let rychlost = 0
-let MRTVA_ZONA = 0
-let ODPAL_RYCHLOST = 0
-let ODPAL_MS = 0
-let STOP = 0
-// klidova hodnota spojiteho serva – doladit tlacitky A/B
-STOP = 90
-// jak dlouho se toci odpalovaci servo – doladit
-ODPAL_MS = 400
-ODPAL_RYCHLOST = 180
-// maly naklon ovladace = turret stoji
-MRTVA_ZONA = 15
-rychlost = 90
-uhel = 110
+let vystrel = false
+let cil_uhel = 0
+let MIR_MAX = 0
+let MIR_MIN = 0
+// ---- nastaveni (doladit) ----
+// klid serva otaceni (P8)
+let STOP = 90
+// klid serva odpalu (P16) – kdyz se rampa sama pomalu toci, posun o 1–2
+let STOP_ODPAL = 90
+// nejnizsi uhel mireni – zjistit tlacitkem A
+MIR_MIN = 90
+// nejvyssi uhel mireni – zjistit tlacitkem B
+MIR_MAX = 150
+// 90 = stoji; cim dal od 90, tim rychleji se rampa toci
+let ODPAL_RYCHLOST = 120
+// jak dlouho se toci = presne jedna sipka – doladit
+let ODPAL_MS = 250
+let MRTVA_ZONA = 15
+cil_uhel = 120
+let uhel = 120
 radio.setGroup(42)
 pins.servoWritePin(AnalogPin.P8, STOP)
-// klid jako v originalu
-pins.servoWritePin(AnalogPin.P15, 110)
-pins.servoWritePin(AnalogPin.P16, STOP)
+pins.servoWritePin(AnalogPin.P16, STOP_ODPAL)
+pins.servoWritePin(AnalogPin.P15, uhel)
 basic.showIcon(IconNames.Happy)
-// Pojistka: kdyz ovladac zmlkne, turret se prestane tocit
+// Mireni (P15): plynule dojizdi k cili, zapisuje jen pri zmene
 basic.forever(function () {
-    if (input.runningTime() - posledni_signal > 500) {
-        pins.servoWritePin(AnalogPin.P8, STOP)
+    uhel = uhel + (cil_uhel - uhel) / 5
+    if (Math.abs(Math.round(uhel) - zapsany_uhel) >= 1) {
+        zapsany_uhel = Math.round(uhel)
+        pins.servoWritePin(AnalogPin.P15, zapsany_uhel)
     }
-    basic.pause(100)
+    basic.pause(20)
+})
+// Odpal (P16): jedna davka otoceni = jedna sipka
+basic.forever(function () {
+    if (vystrel) {
+        music.play(music.tonePlayable(988, music.beat(BeatFraction.Eighth)), music.PlaybackMode.InBackground)
+        pins.servoWritePin(AnalogPin.P16, ODPAL_RYCHLOST)
+        basic.pause(ODPAL_MS)
+        pins.servoWritePin(AnalogPin.P16, STOP_ODPAL)
+        basic.showIcon(IconNames.Target)
+        basic.showIcon(IconNames.Happy)
+        vystrel = false
+    }
+    basic.pause(20)
+})
+// Otaceni (P8) + pojistka: kdyz ovladac zmlkne, turret stoji
+basic.forever(function () {
+    if (input.runningTime() - posledni_signal > 500 || Math.abs(cil_otoc) < MRTVA_ZONA) {
+        pins.servoWritePin(AnalogPin.P8, STOP)
+    } else {
+        pins.servoWritePin(AnalogPin.P8, STOP + Math.constrain(cil_otoc, -60, 60) / 2)
+    }
+    basic.pause(20)
 })
